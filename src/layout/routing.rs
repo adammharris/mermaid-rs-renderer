@@ -2763,10 +2763,24 @@ pub(super) fn edge_crossings_with_existing(
     }
     let mut crossings = 0usize;
     let mut overlap = 0.0f32;
+    // Two segments whose bounds lie more than a point apart can neither cross
+    // nor overlap — `segments_intersect` allows 1e-6, and collinear overlap
+    // needs both of one's ends within 1e-3 of the other's line — so most
+    // pairs are settled by their bounds alone.
+    const APART: f32 = 1.0;
     for segment in points.windows(2) {
         let a1 = segment[0];
         let a2 = segment[1];
+        let (ax0, ax1) = (a1.0.min(a2.0) - APART, a1.0.max(a2.0) + APART);
+        let (ay0, ay1) = (a1.1.min(a2.1) - APART, a1.1.max(a2.1) + APART);
         for &(b1, b2) in existing {
+            if b1.0.max(b2.0) < ax0
+                || b1.0.min(b2.0) > ax1
+                || b1.1.max(b2.1) < ay0
+                || b1.1.min(b2.1) > ay1
+            {
+                continue;
+            }
             if (a1.0 - b1.0).abs() < 1e-6 && (a1.1 - b1.1).abs() < 1e-6
                 || (a1.0 - b2.0).abs() < 1e-6 && (a1.1 - b2.1).abs() < 1e-6
                 || (a2.0 - b1.0).abs() < 1e-6 && (a2.1 - b1.1).abs() < 1e-6

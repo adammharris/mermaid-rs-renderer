@@ -271,6 +271,17 @@ pub(super) fn point_inside_node_shape_strict(node: &NodeLayout, point: (f32, f32
             let ny = (point.1 - cy) / ry;
             nx * nx + ny * ny < 1.0
         }
+        // Every polygon lies within the node's bounds, so a point on or
+        // outside them is never strictly inside — answered without building
+        // the polygon, which most calls (routing tests every node) would
+        // otherwise allocate only to reject.
+        _ if !(point.0 > node.x
+            && point.0 < node.x + node.width
+            && point.1 > node.y
+            && point.1 < node.y + node.height) =>
+        {
+            false
+        }
         _ => shape_polygon_points(node)
             .map(|polygon| point_in_polygon_strict(point, &polygon))
             .unwrap_or_else(|| point_inside_node_bounds_strict(node, point)),
@@ -282,6 +293,17 @@ pub(super) fn segment_hits_node_shape_interior(
     b: (f32, f32),
     node: &NodeLayout,
 ) -> bool {
+    // Every point sampled below lies within the segment's bounds: a segment
+    // whose bounds miss the node's cannot reach its interior. A point past
+    // the bounds by up to 1 can be inside only a circle narrower than 2,
+    // whose radius is held at 1.
+    if a.0.max(b.0) <= node.x - 1.0
+        || a.0.min(b.0) >= node.x + node.width + 1.0
+        || a.1.max(b.1) <= node.y - 1.0
+        || a.1.min(b.1) >= node.y + node.height + 1.0
+    {
+        return false;
+    }
     let steps = (((b.0 - a.0).hypot(b.1 - a.1) / 4.0).ceil() as usize).max(2);
     (1..steps).any(|i| {
         let t = i as f32 / steps as f32;

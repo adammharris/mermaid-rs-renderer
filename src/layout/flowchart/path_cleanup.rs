@@ -7,7 +7,8 @@ use crate::ir::Graph;
 use super::super::NodeLayout;
 use super::super::geometry::{
     endpoint_side_for_point, point_inside_node_shape_strict, segment_hits_node_shape_interior,
-    segment_intrudes_endpoint_rect, source_exits_outward, target_enters_from_outside,
+    segment_intersects_rect_bounds, segment_intrudes_endpoint_rect, source_exits_outward,
+    target_enters_from_outside,
 };
 use super::super::routing::{
     Obstacle, Segment, collinear_overlap_length, compress_path, edge_crossings_with_existing,
@@ -934,6 +935,13 @@ fn outer_crossing_detour_candidates(
     .collect()
 }
 
+/// Whether segment `a`–`b` meets `node`'s bounds: `segment_intersects_rect`
+/// on the node as an obstacle, without building one — the hit tests below
+/// ask it of every node for every segment, and an `Obstacle` clones the id.
+fn node_rect_hit(a: (f32, f32), b: (f32, f32), node: &NodeLayout) -> bool {
+    segment_intersects_rect_bounds(a, b, (node.x, node.y, node.width, node.height))
+}
+
 pub(in crate::layout) fn flowchart_path_hits_non_endpoint_nodes(
     path: &[(f32, f32)],
     from_id: &str,
@@ -944,22 +952,17 @@ pub(in crate::layout) fn flowchart_path_hits_non_endpoint_nodes(
         let a = segment[0];
         let b = segment[1];
         for node in nodes.values() {
-            if node.id == from_id
+            // The hit first: comparing ids is the dearer test, and most
+            // nodes are nowhere near the segment.
+            if !node_rect_hit(a, b, node)
+                || node.id == from_id
                 || node.id == to_id
                 || node.hidden
                 || node.anchor_subgraph.is_some()
             {
                 continue;
             }
-            let obstacle = Obstacle {
-                id: node.id.clone(),
-                x: node.x,
-                y: node.y,
-                width: node.width,
-                height: node.height,
-                members: None,
-            };
-            if segment_intersects_rect(a, b, &obstacle) {
+            {
                 return true;
             }
         }
@@ -978,22 +981,17 @@ fn flowchart_path_non_endpoint_hit_count(
         let a = segment[0];
         let b = segment[1];
         for node in nodes.values() {
-            if node.id == from_id
+            // The hit first: comparing ids is the dearer test, and most
+            // nodes are nowhere near the segment.
+            if !node_rect_hit(a, b, node)
+                || node.id == from_id
                 || node.id == to_id
                 || node.hidden
                 || node.anchor_subgraph.is_some()
             {
                 continue;
             }
-            let obstacle = Obstacle {
-                id: node.id.clone(),
-                x: node.x,
-                y: node.y,
-                width: node.width,
-                height: node.height,
-                members: None,
-            };
-            if segment_intersects_rect(a, b, &obstacle) {
+            {
                 hit_ids.insert(node.id.clone());
             }
         }
@@ -1011,45 +1009,48 @@ fn first_non_endpoint_node_hit(
         let a = segment[0];
         let b = segment[1];
         for node in nodes.values() {
-            if node.id == from_id
+            // The hit first: comparing ids is the dearer test, and most
+            // nodes are nowhere near the segment.
+            if !node_rect_hit(a, b, node)
+                || node.id == from_id
                 || node.id == to_id
                 || node.hidden
                 || node.anchor_subgraph.is_some()
             {
                 continue;
             }
-            let obstacle = Obstacle {
-                id: node.id.clone(),
-                x: node.x,
-                y: node.y,
-                width: node.width,
-                height: node.height,
-                members: None,
-            };
-            if segment_intersects_rect(a, b, &obstacle) {
-                let mut merged = obstacle;
+            {
+                let mut merged = Obstacle {
+                    id: node.id.clone(),
+                    x: node.x,
+                    y: node.y,
+                    width: node.width,
+                    height: node.height,
+                    members: None,
+                };
                 let mut last_idx = seg_idx;
                 for (later_idx, later_segment) in path.windows(2).enumerate().skip(seg_idx) {
                     let la = later_segment[0];
                     let lb = later_segment[1];
                     for other in nodes.values() {
-                        if other.id == from_id
+                        if !node_rect_hit(la, lb, other)
+                            || other.id == from_id
                             || other.id == to_id
                             || other.hidden
                             || other.anchor_subgraph.is_some()
                         {
                             continue;
                         }
-                        let other_obstacle = Obstacle {
-                            id: other.id.clone(),
-                            x: other.x,
-                            y: other.y,
-                            width: other.width,
-                            height: other.height,
-                            members: None,
-                        };
-                        if segment_intersects_rect(la, lb, &other_obstacle) {
+                        {
                             last_idx = later_idx;
+                            let other_obstacle = Obstacle {
+                                id: other.id.clone(),
+                                x: other.x,
+                                y: other.y,
+                                width: other.width,
+                                height: other.height,
+                                members: None,
+                            };
                             merge_obstacle(&mut merged, &other_obstacle);
                         }
                     }
